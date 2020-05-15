@@ -245,7 +245,7 @@ function passwd_sha512encrypt () {
             local user="${1}"
             shift
         elif [ ${fullfmt:-0} -ne 0 ];then
-            read -p "Enter username: " user ; echo ''
+            read -p "Enter username: " user 1>&2 ; echo '' 1>&2
         else
             local user="XXXXXXXXX"; 
         fi
@@ -271,7 +271,7 @@ function passwd_sha512encrypt () {
 #    local tmpfiles=( "${tmpfiles[@]}" "${tmpfile0}" )
 
     if [ -z "${rawpass}" ] ; then
-        read -s -p "Enter password for ${user}: " rawpass ; echo ''
+        read -s -p "Enter password for ${user}: " rawpass 1>&2 ; echo '' 1>&2
         if [ -z "${rawpass}" ] ; then
             echo "[Error] Password is empty (exit)" 1>&2
             return 1
@@ -279,7 +279,7 @@ function passwd_sha512encrypt () {
 
         if [ ${quickcheck:-0} -eq 0 ]; then
             local chkpass=""; 
-            read -s -p "Enter password again for check. : " chkpass ; echo ''
+            read -s -p "Enter password again for check. : " chkpass 1>&2 ; echo '' 1>&2
             if [ "x${rawpass}" != "x${chkpass}" ]; then
                 echo "[Error] Passwords does not match. (exit)" 1>&2
                 return 1
