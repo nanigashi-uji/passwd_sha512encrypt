@@ -1,0 +1,310 @@
+#!/bin/bash
+# -*- mode: shell-script ; -*-
+#
+# passwd_sha512encrypt: Encrypt password with SHA-512
+#                       by Uji Nanigashi (53845049+nanigashi-uji@users.noreply.github.com)
+#                       https://github.com/nanigashi-uji/passwd_sha512encrypt.git
+#
+function passwd_sha512encrypt () {
+    # Prepare Help Messages
+    local funcstatus=1
+    local echo_usage_bk=$(declare -f echo_usage)
+    local encrypt_bk=$(declare -f encrypt)
+    local cleanup_bk=$(declare -f cleanup)
+
+    local oIFS="${IFS}"
+    local IFS=":"
+    local searchdirs=( ${PATH} )
+    local IFS="${oIFS}"
+
+    local cmdcand=( "openssl" "htpasswd" "php" "python3" "python" "python2" "perl" )
+
+    function echo_usage () {
+        if [ "$0" == "${BASH_SOURCE:-$0}" ]; then
+            local this=$0
+        else
+            local this="${FUNCNAME[1]}"
+        fi
+        echo "[Usage] % $(basename ${this}) [options] [username] [rawpassword]"        1>&2
+        echo "[Options]"                                                               1>&2
+        echo "           -o output      : Set outputfile (default: stdout)"            1>&2
+        echo "           -u username    : Set username"                                1>&2
+        echo "           -p rawpassword : Set destenation "                            1>&2
+        echo "           -f             : Output username:encrupted_password"          1>&2
+        echo "                            (Default output is encrupted_password only)" 1>&2
+        echo "           -q             : Skip type-miss check"                        1>&2
+        echo "           -v             : verbose output"                              1>&2
+        echo "           -d             : debug output"                                1>&2
+        echo "           -h             : Show Help (this message)"                    1>&2
+        return
+    }
+
+    local hndlrhup_bk=$(trap -p SIGHUP)
+    local hndlrint_bk=$(trap -p SIGINT) 
+    local hndlrquit_bk=$(trap -p SIGQUIT)
+    local hndlrterm_bk=$(trap -p SIGTERM)
+
+    trap -- 'cleanup ; kill -1  $$' SIGHUP
+    trap -- 'cleanup ; kill -2  $$' SIGINT
+    trap -- 'cleanup ; kill -3  $$' SIGQUIT
+    trap -- 'cleanup ; kill -15 $$' SIGTERM
+    
+    function cleanup () {
+        
+        # removr temporary files and directories
+        # if [ ${#tmpfiles} -gt 0 ]; then
+        #     rm -f "${tmpfiles[@]}"
+        # fi
+        # if [ ${#tmpdirs} -gt 0 ]; then
+        #     rm -rf "${tmpdirs[@]}"
+        # fi
+
+        # Restore  signal handler
+        if [ -n "${hndlrhup_bk}"  ] ; then eval "${hndlrhup_bk}"  ;  else trap --  1 ; fi
+        if [ -n "${hndlrint_bk}"  ] ; then eval "${hndlrint_bk}"  ;  else trap --  2 ; fi
+        if [ -n "${hndlrquit_bk}" ] ; then eval "${hndlrquit_bk}" ;  else trap --  3 ; fi
+        if [ -n "${hndlrterm_bk}" ] ; then eval "${hndlrterm_bk}" ;  else trap -- 15 ; fi
+
+        # Restore alias and functions
+
+        unset echo_usage
+        test -n "${echo_usage_bk}" && eval ${echo_usage_bk%\}}" ; }"
+
+        unset encrypt
+        test -n "${encrypt_bk}" && eval ${encrypt_bk%\}}" ; }"
+
+        unset cleanup
+        test -n "${cleanup_bk}" && eval ${cleanup_bk%\}}" ; }"
+    }
+
+    function encrypt () {
+        if [ "$0" == "${BASH_SOURCE:-$0}" ]; then
+            local this=$0
+        else
+            local this="${FUNCNAME[${#FUNCNAME[@]}]}"
+        fi
+        local OPT=""
+        local OPTARG=""
+        local OPTIND=""
+        local fullfmt=0 
+        local verbose=0
+        local outut="/dev/stdout"
+        local debug=0
+        
+        while getopts "vdfo:" OPT ; do
+            case ${OPT} in
+                o) local output="${OPTARG}"
+                   ;;
+                d) local debug=1
+                   ;;
+                v) local verbose=1
+                   ;;
+                f) local fullfmt=1
+                    ;;
+                \?)
+                    return 1
+                    ;;
+            esac
+        done
+        if [ ${debug:-0} -ne 0 ]; then
+            echo "[Invoked] ${this} $@" 1>&2
+        fi
+        shift $((OPTIND - 1))
+        if [ $# -lt 3 ]; then
+            return 1
+        fi
+        local cmd="${1}"
+        local user="${2}"
+        local raw="${3}"
+        local encd=""
+
+        case "$(basename "${cmd}")" in
+            openssl)
+                ${cmd} passwd -help 2>&1 | ${GREP:-grep} -q -e '-6' || return 1
+                local salt=$("${cmd}" rand -base64 24 | tr -d '+ =' | head -c 16)
+                local encd=$("${cmd}" passwd -6 -salt "${salt}" "${raw}" 2>/dev/null ) || return 1
+                if [ ${verbose:-0} -ne 0 -a "${#encd}" -gt 16  ]; then
+                    echo "Encrypted by ${cmd}" 1>&2
+                fi
+                ;;
+            htpasswd)
+                "${d}/htpasswd" 2>&1 | grep -q -e '-5' || return 1
+                local encd=$("${cmd}" -nb5 -salt "${salt}" "${raw}" 2>/dev/null ) || return 1
+                if [ ${verbose:-0} -ne 0 -a "${#encd}" -gt 16  ]; then
+                    echo "Encrypted by ${cmd}" 1>&2
+                fi
+                ;;
+            python*)
+                if [ "x${OSTYPE}" == "darwin" ]; then
+                    return 1
+                fi
+                if local encd=$("${cmd}" -c 'import crypt; print(crypt.crypt("'"${raw}"'", crypt.mksalt(crypt.METHOD_SHA512)))' 2>/dev/null ) ; then
+                    if [ ${verbose:-0} -ne 0 -a "${#encd}" -gt 16  ]; then
+                        echo "Encrypted by ${cmd} : crypt.crypt & crypt.mksalt" 
+                    fi
+                elif local encd=$("${cmd}" -c 'import crypt, random, hashlib; random.seed(); print crypt.crypt("'"${raw}"'", "$6$" + hashlib.sha1(str(random.random())).hexdigest())' 2>/dev/null) ; then
+                    if [ ${verbose:-0} -ne 0 -a "${#encd}" -gt 16  ]; then
+                        echo "Encrypted by ${cmd} : crypt.crypt & hashlib" 
+                    fi
+                else
+                    return 1
+                fi
+                ;;
+            php*)
+                local encd=$("${cmd}" -r 'echo crypt("'"${raw}"'","$6$".hash("sha512", uniqid(mt_rand(),true))), PHP_EOL;' 2>/dev/null ) || return 1
+                if [ ${verbose:-0} -ne 0 -a "${#encd}" -gt 16  ]; then
+                    echo "Encrypted by ${cmd}" 1>&2
+                fi
+                ;;
+            perl*)
+                if [ "x${OSTYPE}" == "darwin" ]; then
+                    return 1
+                fi
+                local encd=$("${cmd}" -E 'say crypt("'"${raw}"'", "\$6\$". crypt(rand, rand 100))' 2>/dev/null ) || return 1
+                if [ ${verbose:-0} -ne 0 -a "${#encd}" -gt 16  ]; then
+                    echo "Encrypted by ${cmd}" 1>&2
+                fi
+                ;;
+            *)
+                return 1
+                ;;
+        esac
+        if [ -z "${encd}" -o ${#encd} -lt 16 ]; then
+            return 1;
+        fi
+        if [ ${fullfmt:-0} -ne 0 ]; then
+            echo "${user}:${encd}" 1>"${output:-/dev/stdout}"
+        else            
+            echo "${encd}" 1>"${output:-/dev/stdout}"
+        fi
+        return 0
+    }
+
+    local scriptpath=${BASH_SOURCE:-$0}
+    local scriptdir=$(dirname ${scriptpath})
+    if [ "$0" == "${BASH_SOURCE:-$0}" ]; then
+        local this=$(basename ${scriptpath})
+    else
+        local this="${FUNCNAME[${#FUNCNAME[@]}]}"
+    fi
+
+    # Analyze command line options
+    local OPT=""
+    local OPTARG=""
+    local OPTIND=""
+    local subopts=() 
+    local quickcheck=0
+    local rawpass=""; 
+    local user=""; 
+    local output=""; 
+    local fullfmt=0
+    local debug=0
+    local verbose=0
+    while getopts "o:u:vfp:qhd" OPT
+    do
+        case ${OPT} in
+            o) local output="${OPTARG}"
+               ;;
+            u) local user="${OPTARG}"
+               ;;
+            v) local verbose=1
+               local subopts=( "${subopts[@]}" "-v" )
+               ;;
+            p) local rawpass="${OPTARG}"
+               if [ -z "${rawpass}" ]; then
+                   echo "Rawpassword is empty." 1>&2
+                   cleanup
+                   return 1
+               fi
+               ;;
+            f) local fullfmt=1
+               local subopts=( "${subopts[@]}" "-f" )
+               ;;
+            q) local quickcheck=1
+               ;;
+            d) local debug=1
+               local subopts=( "${subopts[@]}" "-d" )
+               ;;
+            h) echo_usage
+               cleanup
+               return 0
+               ;;
+            \?) echo_usage
+                cleanup
+                return 1
+                ;;
+        esac
+    done
+    if [ ${debug:-0} -ne 0 ]; then
+        echo "[Invoked] ${this} $@" 1>&2
+    fi
+    shift $((OPTIND - 1))
+
+    if [ -z "${user}" ]; then
+        if [ $# -gt 0 ]; then
+            local user="${1}"
+            shift
+        elif [ ${fullfmt:-0} -ne 0 ];then
+            read -p "Enter username: " user ; echo ''
+        else
+            local user="XXXXXXXXX"; 
+        fi
+    fi        
+
+    if [ -z "${rawpass}" -a $# -gt 0 ]; then
+        local rawpass="${1}"
+        shift
+    fi
+
+    if [ ${verbose:-0} -ne 0 -a $# -gt 0 ]; then
+       echo "[Warning] unsed commandline arguments : " "$@"  1>&2
+    fi
+
+    if [ -z "${output}" ]; then
+        local output="/dev/stdout"
+        local subopts=( "${subopts[@]}" "-o" "${output}" )
+    fi
+
+#    local tmpdir0=$(mktemp -d "${this}.tmp.XXXXXX" )
+#    local tmpdirs=( "${tmpdirs[@]}" "${tmpdir0}" )
+#    local tmpfile0=$(mktemp   "${this}.tmp.XXXXXX" )
+#    local tmpfiles=( "${tmpfiles[@]}" "${tmpfile0}" )
+
+    if [ -z "${rawpass}" ] ; then
+        read -s -p "Enter password for ${user}: " rawpass ; echo ''
+        if [ -z "${rawpass}" ] ; then
+            echo "[Error] Password is empty (exit)" 1>&2
+            return 1
+        fi
+
+        if [ ${quickcheck:-0} -eq 0 ]; then
+            local chkpass=""; 
+            read -s -p "Enter password again for check. : " chkpass ; echo ''
+            if [ "x${rawpass}" != "x${chkpass}" ]; then
+                echo "[Error] Passwords does not match. (exit)" 1>&2
+                return 1
+            fi
+        fi
+    fi
+    
+    for c in "${cmdcand[@]}"; do
+        for d in "${searchdirs[@]}"; do
+            local cmdpath="${d}/${c}"
+            if [ -x "${cmdpath}" ]; then
+                if [ ${debug:-0} -ne 0 ]; then
+                    echo " Check: ${cmdpath}" 1>&2
+                fi
+                encrypt "${subopts[@]}" "${cmdpath}" "${user}" "${rawpass}" \
+                    && if [ ${debug:-0} -eq 0 ] ; then cleanup ; return 0 ; fi
+            fi
+        done
+    done
+
+    # clean up 
+    cleanup
+    return ${funcstatus}
+}
+
+if [ "$0" == ${BASH_SOURCE:-$0} ]; then
+    passwd_sha512encrypt "$@"
+fi
